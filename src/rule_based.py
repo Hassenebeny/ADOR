@@ -1,121 +1,87 @@
-import logging
-import re
+import json
 import docx
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+def extraire_donnees_docx(docx_path):
+    """
+    Extrait les paires clé/valeur du fichier DOCX.
+    Récupère à la fois le contenu des paragraphes et des tableaux.
+    Retourne un dictionnaire contenant toutes les paires extraites.
+    """
+    doc = docx.Document(docx_path)
+    donnees = {}
 
-def get_next_nonempty_paragraph(paragraphs, start_index):
-    """
-    Retourne le texte du prochain paragraphe non vide après start_index.
-    """
-    for j in range(start_index + 1, len(paragraphs)):
-        p_text = paragraphs[j].text.strip()
-        if p_text:
-            return p_text
-    return ""
+    # Extraction depuis les paragraphes (en considérant que les clés et valeurs se suivent)
+    paragraphs = [p.text.strip() for p in doc.paragraphs if p.text.strip()]
+    i = 0
+    while i < len(paragraphs) - 1:
+        cle = paragraphs[i]
+        valeur = paragraphs[i + 1]
+        # On stocke la première occurrence de la clé
+        if cle not in donnees:
+            donnees[cle] = valeur
+        i += 2
 
-def extract_entities_from_table(doc):
-    """
-    Parcourt tous les tableaux du document DOCX et extrait les paires clé/valeur selon un mapping.
-    """
-    data = {
-        "Counterparty": "",
-        "Initial Valuation Date": "",
-        "Notional": "",
-        "Valuation Date": "",
-        "Maturity": "",
-        "Underlying": "",
-        "Coupon": "",
-        "Barrier": "",
-        "Calendar": ""
-    }
-    mapping = {
-        "party a": "Counterparty",
-        "initial valuation date": "Initial Valuation Date",
-        "notional amount": "Notional",
-        "valuation date": "Valuation Date",
-        "termination date": "Maturity",
-        "underlying": "Underlying",
-        "coupon": "Coupon",
-        "barrier": "Barrier",
-        "business day": "Calendar"
-    }
-    
+    # Extraction depuis les tableaux : pour chaque ligne avec au moins 2 cellules
     for table in doc.tables:
         for row in table.rows:
-            cells = row.cells
-            if len(cells) < 2:
-                continue
-            key_raw = cells[0].text.strip().lower()
-            value_raw = cells[1].text.strip()
-            for known_key, entity_name in mapping.items():
-                if known_key in key_raw:
-                    if entity_name == "Barrier":
-                        match = re.search(r"(\d{1,3}(?:\.\d+)?%|\d{1,3}%)", value_raw)
-                        data[entity_name] = match.group(1) if match else value_raw
-                    else:
-                        data[entity_name] = value_raw
-                    break
-    return data
+            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if len(cells) >= 2:
+                cle = cells[0]
+                valeur = cells[1]
+                donnees[cle] = valeur
 
-def extract_entities_from_paragraphs(doc):
+    return donnees
+
+def extraire_champs(donnees):
     """
-    Extraction rule-based depuis les paragraphes si aucun tableau n'est présent.
-    Pour chaque libellé détecté, la valeur correspondante est prise dans le paragraphe suivant non vide.
+    À partir du dictionnaire complet, conserve uniquement les entités ciblées.
+    La correspondance se fait par recherche de mots-clés (non sensible à la casse).
     """
-    data = {
-        "Counterparty": "",
-        "Initial Valuation Date": "",
-        "Notional": "",
-        "Valuation Date": "",
-        "Maturity": "",
-        "Underlying": "",
-        "Coupon": "",
-        "Barrier": "",
-        "Calendar": ""
+    result = {}
+
+    # Extraction du Counterparty : on recherche uniquement "Party A"
+    counterparty = None
+    for key, value in donnees.items():
+        if "party a" in key.lower():
+            counterparty = value
+            break
+    result["Counterparty"] = counterparty
+
+    # Dictionnaire de correspondance entre entités à extraire et mots-clés possibles
+    mapping = {
+        "Initial Valuation Date": ["Initial Valuation Date"],
+        "Notional": ["Notional", "Notional Amount"],
+        "Valuation Date": ["Valuation Date"],
+        "Maturity": ["Termination Date", "Maturity Date"],
+        "Underlying": ["Underlying"],
+        "Coupon": ["Coupon"],
+        "Barrier": ["Barrier"],
+        "Calendar": ["Business Day", "Calendar"]
     }
-    mapping_keys = {
-        "party a": "Counterparty",
-        "initial valuation date": "Initial Valuation Date",
-        "notional amount": "Notional",
-        "valuation date": "Valuation Date",
-        "termination date": "Maturity",
-        "underlying": "Underlying",
-        "coupon": "Coupon",
-        "barrier": "Barrier",
-        "business day": "Calendar"
-    }
-    
-    paragraphs = doc.paragraphs
-    for i, p in enumerate(paragraphs):
-        text_lower = p.text.strip().lower()
-        for key, entity in mapping_keys.items():
-            if key in text_lower:
-                value = get_next_nonempty_paragraph(paragraphs, i)
-                if entity == "Barrier":
-                    match = re.search(r"(\d{1,3}(?:\.\d+)?%|\d{1,3}%)", value)
-                    value = match.group(1) if match else value
-                data[entity] = value
-    return data
+
+    for champ, keywords in mapping.items():
+        valeur_trouvee = None
+        for mot in keywords:
+            for key, value in donnees.items():
+                if mot.lower() in key.lower():
+                    valeur_trouvee = value
+                    break
+            if valeur_trouvee:
+                break
+        result[champ] = valeur_trouvee
+
+    return result
 
 def rule_based_extraction(file_path):
     """
-    Ouvre le document DOCX et détecte si celui-ci contient des tableaux.
-    Utilise l'extraction table-based si des tableaux sont détectés, sinon utilise l'extraction par paragraphes.
-    Retourne un dictionnaire contenant les entités extraites.
+    Fonction d'extraction rule-based adaptée pour l'API.
+    Ouvre le document DOCX situé à file_path, extrait les données brutes,
+    sélectionne les champs ciblés et renvoie une structure de données exploitable.
     """
-    try:
-        doc = docx.Document(file_path)
-    except Exception as e:
-        logger.error(f"Erreur lors de l'ouverture du fichier DOCX : {e}")
-        return {}
-
-    if len(doc.tables) > 0:
-        logger.info("Tableaux détectés dans le document DOCX. Utilisation de l'extraction table-based.")
-        data_extracted = extract_entities_from_table(doc)
-    else:
-        logger.info("Aucun tableau détecté. Utilisation de l'extraction par paragraphes.")
-        data_extracted = extract_entities_from_paragraphs(doc)
-
-    return data_extracted
+    donnees = extraire_donnees_docx(file_path)
+    champs_extraits = extraire_champs(donnees)
+    output = {
+        "docx file": file_path,
+        "Entities to extract": champs_extraits
+    }
+    return output
