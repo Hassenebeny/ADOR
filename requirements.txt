@@ -1,0 +1,7 @@
+spacy
+PyPDF2
+python-docx
+logging
+re
+uvicorn
+fastapi
