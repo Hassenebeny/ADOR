@@ -7,3 +7,4 @@ fastapi
 langchain_groq
 langchain_core
 langchain
+python-multipart
