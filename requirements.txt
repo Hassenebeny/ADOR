@@ -4,3 +4,6 @@ python-docx
 logging
 uvicorn
 fastapi
+langchain_groq
+langchain_core
+langchain
