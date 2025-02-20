@@ -1,10 +1,13 @@
 # ADOR
  build a financial document reader tool  augmented by IA
-
-## Requirements 
-pip install -r requirements.txt
+## GAD and GMD :
+You will find a docx file that explains the global architecture and a global methdology document that explains both NER model fine-tuning and the role of RAG/LLM in an entity recognition use case.
 
 # Coding Games : /Task_tools
+## Requirements 
+```bash
+pip install -r requirements.txt
+```
 ## Rule Based
 ```bash
 python Task_tools/rule_based_rec.py
